@@ -37,7 +37,6 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Process;
 import android.os.UserManager;
 import android.provider.Settings;
 import android.support.v4.view.ViewPager;
@@ -48,7 +47,9 @@ import android.view.View.OnClickListener;
 import android.view.ViewGroup;
 import android.widget.AppSecurityPermissions;
 import android.widget.Button;
+import android.widget.GridLayout;
 import android.widget.ImageView;
+import android.widget.ScrollView;
 import android.widget.TabHost;
 import android.widget.TextView;
 import com.android.packageinstaller.permission.utils.Utils;
@@ -109,6 +110,7 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
 
     private static final String TAB_ID_ALL = "all";
     private static final String TAB_ID_NEW = "new";
+    private static final String TAB_ID_VERSION = "version";
 
     // Dialog identifiers used in showDialog
     private static final int DLG_BASE = 0;
@@ -120,13 +122,10 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
     private static final int DLG_NOT_SUPPORTED_ON_WEAR = DLG_BASE + 7;
 
     private void startInstallConfirm() {
-        ((TextView) findViewById(R.id.install_confirm_question))
-                .setText(R.string.install_confirm_question);
-        findViewById(R.id.spacer).setVisibility(View.GONE);
         TabHost tabHost = (TabHost)findViewById(android.R.id.tabhost);
         tabHost.setup();
         tabHost.setVisibility(View.VISIBLE);
-        ViewPager viewPager = (ViewPager)findViewById(R.id.pager);
+        final ViewPager viewPager = (ViewPager)findViewById(R.id.pager);
         TabsAdapter adapter = new TabsAdapter(this, tabHost, viewPager);
         // If the app supports runtime permissions the new permissions will
         // be requested at runtime, hence we do not show them at install.
@@ -136,9 +135,10 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
         mScrollView = null;
         mOkCanInstall = false;
         int msg = 0;
-
         AppSecurityPermissions perms = new AppSecurityPermissions(this, mPkgInfo);
         final int N = perms.getPermissionCount(AppSecurityPermissions.WHICH_ALL);
+        LayoutInflater inflater = (LayoutInflater)getSystemService(
+                Context.LAYOUT_INFLATER_SERVICE);
         if (mAppInfo != null) {
             msg = (mAppInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0
                     ? R.string.install_confirm_question_update_system
@@ -156,22 +156,15 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
                 }
             }
             if (!supportsRuntimePermissions && !newPermissionsFound) {
-                LayoutInflater inflater = (LayoutInflater)getSystemService(
-                        Context.LAYOUT_INFLATER_SERVICE);
                 TextView label = (TextView)inflater.inflate(R.layout.label, null);
                 label.setText(R.string.no_new_perms);
                 mScrollView.addView(label);
             }
             adapter.addTab(tabHost.newTabSpec(TAB_ID_NEW).setIndicator(
                     getText(R.string.newPerms)), mScrollView);
-        } else  {
-            findViewById(R.id.tabscontainer).setVisibility(View.GONE);
-            findViewById(R.id.spacer).setVisibility(View.VISIBLE);
         }
         if (!supportsRuntimePermissions && N > 0) {
             permVisible = true;
-            LayoutInflater inflater = (LayoutInflater)getSystemService(
-                    Context.LAYOUT_INFLATER_SERVICE);
             View root = inflater.inflate(R.layout.permissions_list, null);
             if (mScrollView == null) {
                 mScrollView = (CaffeinatedScrollView)root.findViewById(R.id.scrollview);
@@ -180,8 +173,7 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
                         perms.getPermissionsView(AppSecurityPermissions.WHICH_ALL));
             adapter.addTab(tabHost.newTabSpec(TAB_ID_ALL).setIndicator(
                     getText(R.string.allPerms)), root);
-        }
-        if (!permVisible) {
+        } else {
             if (mAppInfo != null) {
                 // This is an update to an application, but there are no
                 // permissions at all.
@@ -194,12 +186,42 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
                 // This is a new application with no permissions.
                 msg = R.string.install_confirm_question_no_perms;
             }
-            tabHost.setVisibility(View.INVISIBLE);
-            mScrollView = null;
+            mScrollView = new CaffeinatedScrollView(this);
+            mScrollView.setFillViewport(true);
+            TextView label = (TextView)inflater.inflate(R.layout.label, null);
+            label.setText(R.string.no_perms);
+            mScrollView.addView(label);
+            adapter.addTab(tabHost.newTabSpec(TAB_ID_ALL).setIndicator(
+                    getText(R.string.allPerms)), mScrollView);
         }
+
+        mScrollView = new CaffeinatedScrollView(this);
+        mScrollView.setFillViewport(true);
+        GridLayout layoutVersion = (GridLayout)inflater.inflate(R.layout.app_version, null);
+        ((TextView)layoutVersion.findViewById(R.id.app_new_version)).setText(mPkgInfo.versionName);
+        if (mAppInfo != null) {
+            PackageInfo pkgCurrent = null;
+            try {
+                pkgCurrent = mPm.getPackageInfo(mAppInfo.packageName, PackageManager.GET_UNINSTALLED_PACKAGES);
+                if (pkgCurrent == null) {
+                    ((TextView)layoutVersion.findViewById(R.id.app_current_version)).setText(R.string.not_available);
+                } else {
+                    ((TextView)layoutVersion.findViewById(R.id.app_current_version)).setText(pkgCurrent.versionName);
+                }
+            } catch (PackageManager.NameNotFoundException ex) {
+                ((TextView)layoutVersion.findViewById(R.id.app_current_version)).setText(R.string.not_available);
+            }
+        } else {
+            ((TextView)layoutVersion.findViewById(R.id.app_current_version)).setText(R.string.not_available);
+        }
+        mScrollView.addView(layoutVersion);
+        adapter.addTab(tabHost.newTabSpec(TAB_ID_VERSION).setIndicator(
+                getText(R.string.appVersion)), mScrollView);
+
         if (msg != 0) {
             ((TextView)findViewById(R.id.install_confirm_question)).setText(msg);
         }
+
         mInstallConfirm.setVisibility(View.VISIBLE);
         mOk.setEnabled(true);
         if (mScrollView == null) {
@@ -208,11 +230,18 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
             mOk.setText(R.string.install);
             mOkCanInstall = true;
         } else {
+            mOk.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    viewPager.setCurrentItem(viewPager.getCurrentItem() + 1, true);
+                }
+            });
             mScrollView.setFullScrollAction(new Runnable() {
                 @Override
                 public void run() {
                     mOk.setText(R.string.install);
                     mOkCanInstall = true;
+                    mOk.setOnClickListener(PackageInstallerActivity.this);
                 }
             });
         }
@@ -327,7 +356,7 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
         // whether the untrusted sources setting is on. This allows partners to
         // implement a "allow untrusted source once" feature.
         if (request == REQUEST_ENABLE_UNKNOWN_SOURCES && result == RESULT_OK) {
-            checkIfAllowedAndInitiateInstall(true);
+            initiateInstall();
         } else {
             clearCachedApkIfNeededAndFinish();
         }
@@ -364,8 +393,8 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
     /**
      * @return whether the device admin restricts installation from unknown sources
      */
-    private boolean isUnknownSourcesDisallowed() {
-        return mUserManager.hasUserRestriction(UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES);
+    private boolean isUnknownSourcesAllowedByAdmin() {
+        return !mUserManager.hasUserRestriction(UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES);
     }
 
     private void initiateInstall() {
@@ -457,54 +486,27 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
         mOk.setOnClickListener(this);
         mCancel.setOnClickListener(this);
 
-        boolean wasSetUp = processPackageUri(packageUri);
-        if (!wasSetUp) {
-            return;
-        }
-
-        checkIfAllowedAndInitiateInstall(false);
-    }
-
-    /**
-     * Check if it is allowed to install the package and initiate install if allowed. If not allowed
-     * show the appropriate dialog.
-     *
-     * @param ignoreUnknownSourcesSettings Ignore {@link #isUnknownSourcesEnabled()} and proceed
-     *                                     even if this would prevented installation.
-     */
-    private void checkIfAllowedAndInitiateInstall(boolean ignoreUnknownSourcesSettings) {
         // Block the install attempt on the Unknown Sources setting if necessary.
-        final boolean requestFromUnknownSource = isInstallRequestFromUnknownSource(getIntent());
+        final boolean requestFromUnknownSource = isInstallRequestFromUnknownSource(intent);
         if (!requestFromUnknownSource) {
-            initiateInstall();
+            processPackageUri(packageUri);
+            return;
         }
 
         // If the admin prohibits it, or we're running in a managed profile, just show error
         // and exit. Otherwise show an option to take the user to Settings to change the setting.
         final boolean isManagedProfile = mUserManager.isManagedProfile();
-        if (isUnknownSourcesDisallowed()) {
-            if ((mUserManager.getUserRestrictionSource(UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES,
-                    Process.myUserHandle()) & UserManager.RESTRICTION_SOURCE_SYSTEM) != 0) {
-                if (ignoreUnknownSourcesSettings) {
-                    initiateInstall();
-                } else {
-                    showDialogInner(DLG_UNKNOWN_SOURCES);
-                }
-            } else {
-                startActivity(new Intent(Settings.ACTION_SHOW_ADMIN_SUPPORT_DETAILS));
-                clearCachedApkIfNeededAndFinish();
-            }
+        if (!isUnknownSourcesAllowedByAdmin()) {
+            startActivity(new Intent(Settings.ACTION_SHOW_ADMIN_SUPPORT_DETAILS));
+            clearCachedApkIfNeededAndFinish();
         } else if (!isUnknownSourcesEnabled() && isManagedProfile) {
             showDialogInner(DLG_ADMIN_RESTRICTS_UNKNOWN_SOURCES);
         } else if (!isUnknownSourcesEnabled()) {
-            if (ignoreUnknownSourcesSettings) {
-                initiateInstall();
-            } else {
-                // Ask user to enable setting first
-                showDialogInner(DLG_UNKNOWN_SOURCES);
-            }
+            // Ask user to enable setting first
+
+            showDialogInner(DLG_UNKNOWN_SOURCES);
         } else {
-            initiateInstall();
+            processPackageUri(packageUri);
         }
     }
 
@@ -517,14 +519,7 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
         super.onDestroy();
     }
 
-    /**
-     * Parse the Uri and set up the installer for this package.
-     *
-     * @param packageUri The URI to parse
-     *
-     * @return {@code true} iff the installer could be set up
-     */
-    private boolean processPackageUri(final Uri packageUri) {
+    private void processPackageUri(final Uri packageUri) {
         mPackageURI = packageUri;
 
         final String scheme = packageUri.getScheme();
@@ -543,7 +538,7 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
                             + " not available. Discontinuing installation");
                     showDialogInner(DLG_PACKAGE_ERROR);
                     setPmResult(PackageManager.INSTALL_FAILED_INVALID_APK);
-                    return false;
+                    return;
                 }
                 as = new PackageUtil.AppSnippet(mPm.getApplicationLabel(mPkgInfo.applicationInfo),
                         mPm.getApplicationIcon(mPkgInfo.applicationInfo));
@@ -558,7 +553,7 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
                     Log.w(TAG, "Parse error when parsing manifest. Discontinuing installation");
                     showDialogInner(DLG_PACKAGE_ERROR);
                     setPmResult(PackageManager.INSTALL_FAILED_INVALID_APK);
-                    return false;
+                    return;
                 }
                 mPkgInfo = PackageParser.generatePackageInfo(parsed, null,
                         PackageManager.GET_PERMISSIONS, 0, 0, null,
@@ -569,20 +564,20 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
             case SCHEME_CONTENT: {
                 mStagingAsynTask = new StagingAsyncTask();
                 mStagingAsynTask.execute(packageUri);
-                return false;
+                return;
             }
 
             default: {
                 Log.w(TAG, "Unsupported scheme " + scheme);
                 setPmResult(PackageManager.INSTALL_FAILED_INVALID_URI);
                 clearCachedApkIfNeededAndFinish();
-                return false;
+                return;
             }
         }
 
         PackageUtil.initSnippetForNewApp(this, as, R.id.app_snippet);
 
-        return true;
+        initiateInstall();
     }
 
     /** Get the ApplicationInfo for the calling package, if available */
@@ -808,11 +803,7 @@ public class PackageInstallerActivity extends Activity implements OnCancelListen
             }
             mContentUriApkStagingFile = file;
             Uri fileUri = Uri.fromFile(file);
-
-            boolean wasSetUp = processPackageUri(fileUri);
-            if (wasSetUp) {
-                checkIfAllowedAndInitiateInstall(false);
-            }
+            processPackageUri(fileUri);
         }
 
         @Override
